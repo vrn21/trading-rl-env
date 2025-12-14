@@ -1,128 +1,128 @@
 # Blank Environment
 
-Minimal starter template for building HUD environments.
-See [docs](https://docs.hud.so/build-environments) for the complete environment design workflow.
+A minimal counter-based HUD environment template.
 
-## Architecture
+## 1. Deploy to Platform
 
-**`environment/`** - Produces structured data
+If you haven't already, connect this repo to hud.ai:
 
-- Owns all state (game logic, browser sessions, databases, etc.)
-- Exposes HTTP endpoints `/health`, `/act`, `/reset`, `/state` that return structured information about the environment state
+1. Push to GitHub
+2. Go to [hud.ai](https://hud.ai) → **New** → **Environment**
+3. Connect your GitHub repo
+4. Your environment builds automatically on each push
 
-**`server/`** - Wraps data in MCP tools
+Once deployed, your environment is accessible by its slug (e.g., `my-org/blank`).
 
-- Calls environment endpoints to get structured data for the agent, and environment setup/evaluation
-- Agents and tasks interact only with these tools!
+## 2. Define Tools and Scenarios
 
-**Why separate?** Edit tools for the agent or tasks without restarting the heavy environment backend.
-
-## Development
-
-```bash
-# Terminal 1 - Environment backend
-cd environment
-uv run uvicorn server:app --reload
-
-# Terminal 2 - MCP server
-cd server
-uv run hud dev
-```
-
-Uncomment the `setup` tool in `server/tools.py`, save, and watch it reload.
-Visit http://localhost:8765/docs to see the new tool appear instantly.
-
-In general, we recommend starting work on the environment backend first, then developing the MCP server to expose the right things to the agent.
-
-For complex environments that require many dependencies, we recommend running `hud dev` in the environment root:
-
-```bash
-cd ..
-hud dev
-```
-
-## Tasks & Evaluation
-
-```bash
-# Build first in the global folder with the Dockerfile (creates blank:0.1.0)
-hud build
-```
-
-Your `tasks.json` uses `docker run` to launch the environment:
-
-```json
-{
-  "prompt": "Your task prompt",
-  "mcp_config": {
-    "local": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", "blank:0.1.0"]
-    }
-  }
-}
-```
-
-**Commands:**
-
-```bash
-# Build first
-hud build
-
-# Test task locally
-hud eval tasks.json
-
-# Push environment for remote running
-hud push
-
-# Production RL training
-hud rl tasks.json  # Auto-converts docker→remote, builds & pushes if needed
-```
-
-## Publishing Your Environment
-
-Once your environment is ready, you can share it with the community:
-
-### 1. Push to Registry
-
-```bash
-# Build and push your environment (requires docker hub login and hud api key)
-hud build
-hud push
-```
-
-### 2. Create a Dataset
-
-Create a dataset on HuggingFace with your tasks:
-
-**Option A: Upload manually**
-
-1. Upload your `tasks.json` to HuggingFace
-2. Make sure it's **public** to appear on leaderboards
-
-**Option B: Use the SDK**
+Tools are functions agents can call. Scenarios define the evaluation lifecycle.
 
 ```python
-from hud.datasets import save_tasks
-import json
+from hud import Environment
 
-# Load your tasks
-with open("tasks.json") as f:
-    tasks = json.load(f)
+env = Environment(name="blank")
 
-# Push to HuggingFace
-save_tasks(tasks, repo_id="your-org/your-dataset")
+@env.tool()
+async def act() -> str:
+    """Increment the counter by 1."""
+    resp = await http_client.post("/act")
+    return f"Counter: {resp.json().get('count', 0)}"
+
+@env.scenario("count-to")
+async def count_to(target: int = 10):
+    await http_client.post("/reset")                    # Setup
+    answer = yield f"Count to {target}"                 # Prompt → agent runs
+    current = (await http_client.get("/state")).json()["count"]
+    yield 1.0 if current >= target else 0.0             # Reward
 ```
 
-### 3. Run and Track Performance
+## 3. Create Tasks from Scenarios
+
+Tasks are scenario instances with specific arguments.
+
+**In Code:**
+```python
+tasks = [
+    env("count-to", target=3),
+    env("count-to", target=10),
+]
+```
+
+**From JSON:**
+```json
+[
+  {"env": {"name": "my-org/blank"}, "scenario": "count-to", "args": {"target": 3}},
+  {"env": {"name": "my-org/blank"}, "scenario": "count-to", "args": {"target": 10}}
+]
+```
+
+**On Platform:**
+After deploying, create tasks from your scenarios on hud.ai. Access them by slug:
+```python
+from hud.datasets import load_tasks
+tasks = load_tasks("my-org/blank-tasks")
+```
+
+## 4. Run Evaluations
+
+Run tasks and see results on hud.ai. You have three options:
+
+**On Platform:**
+Run evaluations at scale directly on [hud.ai](https://hud.ai) with parallel execution and automatic tracing.
+
+**CLI:**
+```bash
+hud eval ./remote_tasks.json --model gpt-4o --remote  # https://hud.ai/models
+hud eval my-org/blank-tasks --model gpt-4o --remote --group 5
+```
+
+**Python:**
+```python
+import hud
+from hud.agents import OpenAIChatAgent  # See all models: https://hud.ai/models
+
+tasks = [env("count-to", target=3), env("count-to", target=5)]
+
+async with hud.eval(tasks) as ctx:
+    agent = OpenAIChatAgent.create(model="gpt-4o")  # Uses inference.hud.ai
+    await agent.run(ctx)
+
+# Results are automatically traced to hud.ai
+```
+
+**With Variants (A/B Testing):**
+```python
+async with hud.eval(tasks, variants={"model": ["gpt-4o-mini", "gpt-4o"]}, group=2) as ctx:
+    agent = OpenAIChatAgent.create(model=ctx.variants["model"])
+    await agent.run(ctx)
+```
+
+## Local Development
 
 ```bash
-# Run Claude on your benchmark
-hud eval "your-org/your-dataset" claude
+# Start the backend
+uvicorn backend.app:app --port 8005 --reload
 
-# View results at:
-# hud.so/leaderboards/your-org/your-dataset
+# Test locally
+python local_test.py
+
+# Test with remote tasks
+python remote_test.py
 ```
 
-**Note**: Only public HuggingFace datasets appear as leaderboards!
+## Structure
 
-📚 Learn more: [Creating Benchmarks](https://docs.hud.so/evaluate-agents/create-benchmarks) | [Leaderboards](https://docs.hud.so/evaluate-agents/leaderboards)
+```
+hud-blank/
+├── env.py              # Environment + tools + scenarios
+├── backend/app.py      # FastAPI backend for state
+├── local_test.py       # Local testing examples
+├── remote_test.py      # Platform integration examples
+├── remote_tasks.json   # Task definitions
+├── Dockerfile.hud
+└── pyproject.toml
+```
+
+## Documentation
+
+Full documentation: [docs.hud.ai](https://docs.hud.ai)

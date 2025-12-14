@@ -1,9 +1,12 @@
-"""Minimal FastAPI environment server (HTTP-based)."""
+"""FastAPI backend for the blank environment.
 
-from fastapi import FastAPI
+This provides the stateful counter service that the environment tools interact with.
+"""
 
 import logging
 import sys
+
+from fastapi import FastAPI
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -11,18 +14,21 @@ logging.basicConfig(
     format="[%(levelname)s] %(asctime)s | %(name)s | %(message)s",
 )
 
-app = FastAPI(title="Blank Environment API")
+app = FastAPI(title="Blank Environment Backend")
 
+# In-memory state
 _count = 0
 
 
 @app.get("/health")
 def health():
+    """Health check endpoint."""
     return {"status": "ok"}
 
 
 @app.post("/act")
 def act():
+    """Increment the counter."""
     global _count
     _count += 1
     return {"count": _count}
@@ -30,6 +36,7 @@ def act():
 
 @app.post("/reset")
 def reset():
+    """Reset the counter to 0."""
     global _count
     _count = 0
     return {"ok": True}
@@ -37,4 +44,6 @@ def reset():
 
 @app.get("/state")
 def state():
+    """Get the current counter state."""
     return {"count": _count}
+
