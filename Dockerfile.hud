@@ -89,4 +89,4 @@ RUN mkdir -p /var/log/supervisor /market-simulator/quod/data/log
 COPY supervisord.conf /etc/supervisor/conf.d/trading.conf
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/trading.conf"]
+CMD ["/bin/bash", "-c", "supervisord -n -c /etc/supervisor/conf.d/trading.conf > /dev/null"]
