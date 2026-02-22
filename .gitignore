@@ -16,6 +16,11 @@ dist/
 .venv
 venv/
 
+cfg/
+database_files/
+files_store_path_common/
+# log/
+
 # Node
 node_modules/
 

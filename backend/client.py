@@ -11,6 +11,7 @@ FIX session config (must match cfg/configSim.txt):
 """
 
 import logging
+import os
 import socket
 import time
 import uuid
@@ -20,9 +21,10 @@ import simplefix
 
 logger = logging.getLogger(__name__)
 
-REST_URL  = "http://localhost:9050"
-FIX_HOST  = "localhost"
-FIX_PORT  = 9051
+# QuantReplay connection config — override via env vars for platform deployment
+REST_URL  = os.getenv("QUANTREPLAY_REST_URL", "http://localhost:9050")
+FIX_HOST  = os.getenv("QUANTREPLAY_FIX_HOST", "localhost")
+FIX_PORT  = int(os.getenv("QUANTREPLAY_FIX_PORT", "9051"))
 
 # Must match cfg/configSim.txt SESSION entries
 FIX_SENDER = "CLIENT_XETRA"

@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "hud-python[agents]>=0.5.17",
     "httpx>=0.24.0",
-    "simplefix>=1.2",
+    "simplefix>=1.0.0",
     "numpy>=1.26.0",
 ]
 

@@ -38,8 +38,8 @@ async def test_tools_standalone() -> None:
         print("\n--- list_symbols ---")
         print(await env.call_tool("list_symbols"))
 
-        print("\n--- get_quote (AMZ) ---")
-        print(await env.call_tool("get_quote", symbol="AMZ"))
+        print("\n--- get_last_price (AMZ) ---")
+        print(await env.call_tool("get_last_price", symbol="AMZ"))
 
         print("\n--- get_portfolio ---")
         print(await env.call_tool("get_portfolio"))

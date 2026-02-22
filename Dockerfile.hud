@@ -1,46 +1,92 @@
-# Trading RL Environment — HUD Docker Image
+# syntax=docker/dockerfile:1
+# =============================================================================
+# Trading RL Environment — Self-Contained HUD Docker Image
 #
-# Startup sequence:
-#   1. Start QuantReplay (matching engine + Postgres) via docker compose
-#   2. Poll /api/venuestatus until QuantReplay is ready
-#   3. Launch the MCP server (hud dev env:env --stdio)
+# Everything runs inside this single container (no Docker daemon needed):
+#   1. PostgreSQL  — stores QuantReplay market data
+#   2. marketsimulator — the QuantReplay matching engine (REST :9050 / FIX :9051)
+#   3. HUD MCP server  — exposes trading tools to the RL agent
 #
-# QuantReplay FIX session config:
-#   BeginString  : FIXT.1.1
-#   SenderCompID : CLIENT_XETRA
-#   TargetCompID : SIM_XETRA
+# Process manager: supervisord
+# Platform: linux/amd64 (QuantReplay binary is x86-only)
+# =============================================================================
 
-FROM python:3.11-bookworm
+# ── Stage 1: Pull the QuantReplay binary + template config ───────────────────
+FROM --platform=linux/amd64 ghcr.io/quod-financial/deploy_marketsim:latest AS xetra
 
-WORKDIR /mcp_server
+# ── Stage 2: Pull the Liquibase migration tool + Java ────────────────────────
+FROM --platform=linux/amd64 ghcr.io/quod-financial/liquibase:latest AS liquibase
 
-# Install Docker CLI (needed to run docker compose inside the container)
-RUN apt-get update && apt-get install -y \
+# ── Stage 3: Final image ──────────────────────────────────────────────────────
+FROM --platform=linux/amd64 python:3.11-bookworm AS final
+
+# ── System deps ───────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    docker.io \
+    postgresql \
+    postgresql-client \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# ── Copy Java (needed by Liquibase) ──────────────────────────────────────────
+COPY --from=liquibase /opt/java /opt/java
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# ── Copy Liquibase tool + changelog ──────────────────────────────────────────
+COPY --from=liquibase /liquibase /liquibase
+ENV LIQUIBASE_HOME=/liquibase
+
+# ── Copy QuantReplay binary + template config ─────────────────────────────────
+COPY --from=xetra /market-simulator /market-simulator
+COPY --from=xetra /template         /template
+COPY --from=xetra /entrypoint_os.sh /entrypoint_os.sh
+RUN chmod +x /entrypoint_os.sh && \
+    sed -i 's/<host>market-simulator-database<\/host>/<host>localhost<\/host>/g' /template/cfg/market_simulator.xml
+
+# ── Install Python MCP server deps ───────────────────────────────────────────
+WORKDIR /mcp_server
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir -e .
 
-# Copy source
+# ── Copy MCP server source ────────────────────────────────────────────────────
 COPY env.py        ./env.py
 COPY backend/      ./backend/
 COPY grading/      ./grading/
 COPY tools/        ./tools/
 COPY tasks/        ./tasks/
 
-# Copy docker-compose for QuantReplay services
-COPY docker-compose.yml ./docker-compose.yml
+# Copy our custom configSim.txt (defines CLIENT_XETRA / SIM_XETRA session)
+COPY cfg/configSim.txt /market-simulator/quod/data/cfg/configSim.txt
 
-# Startup script: launch QuantReplay, wait for it, then start MCP server
-CMD ["sh", "-c", "\
-    docker compose up -d && \
-    echo 'Waiting for QuantReplay on :9050...' && \
-    until curl -sf http://localhost:9050/api/venuestatus > /dev/null 2>&1; do \
-    sleep 2; \
-    done && \
-    echo 'QuantReplay ready — starting MCP server.' && \
-    hud dev env:env --stdio \
-    "]
+# ── PostgreSQL setup ──────────────────────────────────────────────────────────
+# Initialize the DB cluster and create the simdb database + sim user at build time
+# This bakes a ready DB into the image so startup is fast.
+RUN service postgresql start && \
+    sleep 3 && \
+    su -c "psql -c \"CREATE USER sim WITH PASSWORD 'sim';\"" postgres && \
+    su -c "psql -c \"CREATE DATABASE simdb OWNER sim;\"" postgres && \
+    su -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE simdb TO sim;\"" postgres && \
+    service postgresql stop
+
+# ── Run Liquibase migrations at build time ────────────────────────────────────
+# Runs schema + demo data migrations so the DB is ready when the container starts.
+RUN service postgresql start && \
+    sleep 3 && \
+    JAVA_HOME=/opt/java/openjdk \
+    /liquibase/liquibase \
+    --url=jdbc:postgresql://localhost:5432/simdb \
+    --username=sim \
+    --password=sim \
+    --classpath=/liquibase/project \
+    --changelog-file=root-changelog.yml \
+    --contexts=market-simulator,schema,demo \
+    update && \
+    service postgresql stop
+
+# ── supervisord config ────────────────────────────────────────────────────────
+RUN mkdir -p /var/log/supervisor /market-simulator/quod/data/log
+COPY supervisord.conf /etc/supervisor/conf.d/trading.conf
+
+# ── Startup ───────────────────────────────────────────────────────────────────
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/trading.conf"]

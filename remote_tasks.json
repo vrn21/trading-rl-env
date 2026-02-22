@@ -2,6 +2,6 @@
   {
     "env": {"name": "trading-rl-env"},
     "scenario": "trading:take-profit-basic",
-    "args": {"symbol": "AMZ", "initial_cash": 15000, "target_profit": 300}
+    "args": {"symbol": "AMZ", "initial_cash": 15000, "target_profit": 200}
   }
 ]

@@ -232,22 +232,22 @@ def test_grader():
 
     # PnLGrader: zero profit
     p = Portfolio(initial_cash=15_000)
-    g = PnLGrader.grade(weight=1.0, portfolio=p, initial_cash=15_000, target_profit=300)
+    g = PnLGrader.grade(weight=1.0, portfolio=p, initial_cash=15_000, target_profit=200)
     check("zero profit → PnLGrader score 0.0", g.score == 0.0)
 
-    # PnLGrader: full profit
-    p.record_fill("AMZ", "BUY",  100, 150.0)
-    p.record_fill("AMZ", "SELL", 100, 153.0)  # $300 profit
-    g = PnLGrader.grade(weight=1.0, portfolio=p, initial_cash=15_000, target_profit=300)
-    check("profit=300, target=300 → PnLGrader 1.0", abs(g.score - 1.0) < 1e-6)
+    # PnLGrader: full profit (AMZ actual prices: buy ~102, sell ~104 → $200 on 100 shares)
+    p.record_fill("AMZ", "BUY",  100, 102.0)   # fill at ask=102
+    p.record_fill("AMZ", "SELL", 100, 104.0)   # sell at 104 → $200 profit
+    g = PnLGrader.grade(weight=1.0, portfolio=p, initial_cash=15_000, target_profit=200)
+    check("profit=200, target=200 → PnLGrader 1.0", abs(g.score - 1.0) < 1e-6)
     print(f"       actual_profit={p.net_profit():.2f}")
 
-    # PnLGrader: partial
+    # PnLGrader: partial (100 shares, buy 102, sell 103 → $100 = 50% of target 200)
     p2 = Portfolio(initial_cash=15_000)
-    p2.record_fill("AMZ", "BUY",  100, 150.0)
-    p2.record_fill("AMZ", "SELL", 100, 151.5)  # $150 → 0.5
-    g2 = PnLGrader.grade(weight=1.0, portfolio=p2, initial_cash=15_000, target_profit=300)
-    check("profit=150, target=300 → PnLGrader 0.5", abs(g2.score - 0.5) < 1e-6)
+    p2.record_fill("AMZ", "BUY",  100, 102.0)
+    p2.record_fill("AMZ", "SELL", 100, 103.0)  # $100 → 0.5 of target 200
+    g2 = PnLGrader.grade(weight=1.0, portfolio=p2, initial_cash=15_000, target_profit=200)
+    check("profit=100, target=200 → PnLGrader 0.5", abs(g2.score - 0.5) < 1e-6)
 
     # TradeActivityGrader: no fills
     p_empty = Portfolio(initial_cash=15_000)
@@ -260,14 +260,14 @@ def test_grader():
 
     # Combined Grade (0.8 PnL + 0.2 activity)
     grade = Grade.from_subscores([
-        PnLGrader.grade(weight=0.8, portfolio=p, initial_cash=15_000, target_profit=300),
+        PnLGrader.grade(weight=0.8, portfolio=p, initial_cash=15_000, target_profit=200),
         TradeActivityGrader.grade(weight=0.2, portfolio=p),
     ])
     check("combined grade = 1.0 when both hit", abs(grade.score - 1.0) < 1e-6)
     print(f"       combined score: {grade.score:.4f}, metadata: {grade.metadata}")
 
     # Portfolio.last_price
-    check("last_price returns last sell price", p.last_price("AMZ") == 153.0)
+    check("last_price returns last sell price", p.last_price("AMZ") == 104.0)
     check("last_price for unknown symbol is None", p.last_price("UNKNOWN") is None)
 
     # Portfolio.to_dict (no args now)
