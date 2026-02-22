@@ -57,7 +57,7 @@ COPY tools/        ./tools/
 COPY tasks/        ./tasks/
 
 # Copy our custom configSim.txt (defines CLIENT_XETRA / SIM_XETRA session)
-COPY cfg/configSim.txt /market-simulator/quod/data/cfg/configSim.txt
+COPY config/configSim.txt /market-simulator/quod/data/cfg/configSim.txt
 
 # ── PostgreSQL setup ──────────────────────────────────────────────────────────
 # Initialize the DB cluster and create the simdb database + sim user at build time

@@ -14,11 +14,10 @@ dist/
 .coverage
 .env
 .venv
-venv/
-
 cfg/
 database_files/
 files_store_path_common/
+# log/h_common/
 # log/
 
 # Node
