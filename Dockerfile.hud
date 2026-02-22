@@ -84,9 +84,10 @@ RUN service postgresql start && \
     update && \
     service postgresql stop
 
-# ── supervisord config ────────────────────────────────────────────────────────
-RUN mkdir -p /var/log/supervisor /market-simulator/quod/data/log
-COPY supervisord.conf /etc/supervisor/conf.d/trading.conf
+# ── Startup script ────────────────────────────────────────────────────────────
+RUN mkdir -p /market-simulator/quod/data/log
+COPY run.sh /run.sh
+RUN chmod +x /run.sh
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-CMD ["/bin/bash", "-c", "supervisord -n -c /etc/supervisor/conf.d/trading.conf > /dev/null"]
+CMD ["/run.sh"]

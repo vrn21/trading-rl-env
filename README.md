@@ -6,7 +6,7 @@ Agents interact with a live, continuous double-auction limit order book using st
 
 ## Architecture
 
-The environment is a fully self-contained Docker image designed for headless RL training. It combines three layers running concurrently via `supervisord`:
+The environment is a fully self-contained Docker image designed for headless RL training. It combines three layers running concurrently via a custom `run.sh` bash entrypoint:
 
 1. **Market Simulator (Layer 1 & 2):** QuantReplay engine exposing a FIX protocol gateway (`:9051`) for order management and a REST API (`:9050`) for venue status.
 2. **PostgreSQL Database:** Embedded and pre-seeded at build time with market schema and historical `AMZ` (Amazon) level-2 market data.
