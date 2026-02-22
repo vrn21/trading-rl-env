@@ -1,18 +1,46 @@
-FROM public.ecr.aws/docker/library/python:3.11-bookworm
+# Trading RL Environment — HUD Docker Image
+#
+# Startup sequence:
+#   1. Start QuantReplay (matching engine + Postgres) via docker compose
+#   2. Poll /api/venuestatus until QuantReplay is ready
+#   3. Launch the MCP server (hud dev env:env --stdio)
+#
+# QuantReplay FIX session config:
+#   BeginString  : FIXT.1.1
+#   SenderCompID : CLIENT_XETRA
+#   TargetCompID : SIM_XETRA
 
-WORKDIR /app
+FROM python:3.11-bookworm
 
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+WORKDIR /mcp_server
 
-# Install dependencies
+# Install Docker CLI (needed to run docker compose inside the container)
+RUN apt-get update && apt-get install -y \
+    curl \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -e .
 
-# Copy source code
-COPY env.py ./
-COPY backend/ ./backend/
+# Copy source
+COPY env.py        ./env.py
+COPY backend/      ./backend/
+COPY grading/      ./grading/
+COPY tools/        ./tools/
+COPY tasks/        ./tasks/
 
-ENV BACKEND_PORT=8005
+# Copy docker-compose for QuantReplay services
+COPY docker-compose.yml ./docker-compose.yml
 
-# Start backend in background, then run environment
-CMD ["sh", "-c", "uvicorn backend.app:app --host 0.0.0.0 --port $BACKEND_PORT --log-level warning >&2 & sleep 0.5 && hud dev env:env --stdio"]
+# Startup script: launch QuantReplay, wait for it, then start MCP server
+CMD ["sh", "-c", "\
+    docker compose up -d && \
+    echo 'Waiting for QuantReplay on :9050...' && \
+    until curl -sf http://localhost:9050/api/venuestatus > /dev/null 2>&1; do \
+    sleep 2; \
+    done && \
+    echo 'QuantReplay ready — starting MCP server.' && \
+    hud dev env:env --stdio \
+    "]

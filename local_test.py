@@ -1,86 +1,73 @@
-"""Local test script for the blank environment.
+"""Local test script for the trading RL environment.
 
-Run the backend first: uvicorn backend.app:app --port 8005
-Then run this script: python local_test.py
+Development workflow:
+1. Start QuantReplay:  docker compose up -d
+2. Start the env:      hud dev -w tasks -w grading --port 8765
+3. Run this script:    python local_test.py
+4. Edit tasks/ or grading/ → container auto-reloads → re-run
 """
 
 import asyncio
+import os
 
 import hud
-from hud.agents import OpenAIChatAgent
+from hud import Environment
+from hud.agents.claude import ClaudeAgent
+from hud.settings import settings
 from openai import AsyncOpenAI
 
-from env import env
+# IMPORTANT: Do NOT import env from env.py here.
+# Importing env.py would register tools locally (where backend clients aren't connected).
+# A fresh Environment() routes all tool calls to the running container.
+env = Environment("trading")
 
-# Use HUD inference gateway - see all models at https://hud.ai/models
-client = AsyncOpenAI(base_url="https://inference.hud.ai")
+client = AsyncOpenAI(base_url="https://inference.hud.ai", api_key=settings.api_key)
+
+DEV_URL = os.getenv("HUD_DEV_URL", "http://localhost:8765/mcp")
+env.connect_url(DEV_URL)
 
 
-async def test_tools_standalone():
-    """Test environment tools directly."""
-    print("=== Test 1: Standalone Tools ===")
+async def test_tools_standalone() -> None:
+    """Sanity check: call tools directly without a scenario or agent."""
+    print("\n=== Test: Standalone Tools ===")
 
     async with env:
-        print(f"Tools: {[t.name for t in env.as_tools()]}")
-        for _ in range(3):
-            print(await env.call_tool("act"))
+        tools = env.as_tools()
+        print(f"Agent-visible tools: {[t.name for t in tools if not t.name.startswith('_')]}")
+
+        print("\n--- list_symbols ---")
+        print(await env.call_tool("list_symbols"))
+
+        print("\n--- get_quote (AMZ) ---")
+        print(await env.call_tool("get_quote", symbol="AMZ"))
+
+        print("\n--- get_portfolio ---")
+        print(await env.call_tool("get_portfolio"))
 
 
-async def test_scenario_manual():
-    """Test scenario with manual OpenAI calls."""
-    print("\n=== Test 2: Scenario (Manual Agent Loop) ===")
+async def test_scenario() -> None:
+    """Run the take-profit-basic scenario with a Claude agent."""
+    print("\n=== Test: take-profit-basic ===")
 
-    task = env("count-to", target=3)
-
-    async with hud.eval(task) as ctx:
-        messages = [{"role": "user", "content": ctx.prompt}]
-
-        while True:
-            response = await client.chat.completions.create(
-                model="gpt-4o",  # https://hud.ai/models
-                messages=messages,
-                tools=ctx.as_openai_chat_tools(),
-            )
-            msg = response.choices[0].message
-
-            if not msg.tool_calls:
-                break
-
-            messages.append(msg)
-            for tc in msg.tool_calls:
-                result = await ctx.call_tool(tc)
-                messages.append(result)
+    async with env:
+        task = env("take-profit-basic")
+        async with hud.eval(task, trace=True) as ctx:
+            agent = ClaudeAgent.create(model="claude-sonnet-4-5")
+            await agent.run(ctx, max_steps=50)
 
 
-async def test_scenario_agent():
-    """Test scenario with OpenAIChatAgent."""
-    print("\n=== Test 3: Scenario (Agent) ===")
+async def main() -> None:
+    print("Trading RL Env — Local Test")
+    print("=" * 50)
+    print(f"Container: {DEV_URL}")
+    print("Make sure the env is running:")
+    print("  1. docker compose up -d")
+    print("  2. hud dev -w tasks -w grading --port 8765")
+    print("=" * 50)
 
-    task = env("count-to", target=5)
-
-    async with hud.eval(task) as ctx:
-        agent = OpenAIChatAgent.create(model="gpt-4o")  # https://hud.ai/models
-        await agent.run(ctx)
-
-
-async def test_distribution():
-    """Test multiple tasks with variants and groups for A/B testing."""
-    print("\n=== Test 4: Distribution (Variants + Groups) ===")
-
-    tasks = [env("count-to", target=3), env("count-to", target=5)]
-    variants = {"model": ["gpt-4o-mini", "gpt-4o"]}
-    group = 2
-
-    async with hud.eval(tasks, variants=variants, group=group) as ctx:
-        agent = OpenAIChatAgent.create(model=ctx.variants["model"])
-        await agent.run(ctx, max_steps=10)
-
-
-async def main():
     await test_tools_standalone()
-    await test_scenario_manual()
-    await test_scenario_agent()
-    await test_distribution()
+    # Uncomment to run a full scenario with an agent:
+    # await test_scenario()
 
 
 if __name__ == "__main__":

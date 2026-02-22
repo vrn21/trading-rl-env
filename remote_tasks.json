@@ -1,17 +1,7 @@
 [
   {
-    "env": {"name": "my-org/blank"},
-    "scenario": "count-to",
-    "args": {"target": 3}
-  },
-  {
-    "env": {"name": "my-org/blank"},
-    "scenario": "count-to",
-    "args": {"target": 10}
-  },
-  {
-    "env": {"name": "my-org/blank"},
-    "scenario": "count-to",
-    "args": {"target": 5}
+    "env": {"name": "trading-rl-env"},
+    "scenario": "trading:take-profit-basic",
+    "args": {"symbol": "AMZ", "initial_cash": 15000, "target_profit": 300}
   }
 ]

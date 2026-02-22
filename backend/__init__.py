@@ -1,6 +1,5 @@
-"""Backend package - FastAPI application for stateful operations."""
+"""backend/__init__.py"""
 
-from .app import app
+from .client import QuantReplayClient, Portfolio
 
-__all__ = ["app"]
-
+__all__ = ["QuantReplayClient", "Portfolio"]
