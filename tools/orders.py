@@ -30,11 +30,26 @@ def register(env, client, portfolio):
         if price <= 0:
             return {"error": "price must be positive"}
 
-        order_id = client.place_order(symbol, side, qty, price)
+        import uuid
+        order_id = uuid.uuid4().hex[:8]
+
+        # ── Budget enforcement ─────────────────────────────────────────────────
+        err = portfolio.place_order(order_id, symbol, side, qty, price)
+        if err:
+            return {"error": err}
+        # ── End budget enforcement ─────────────────────────────────────────────
+
+        client.place_order(symbol, side, qty, price, order_id=order_id)
+        
         fills = client.poll_fills()
+        real_fills = []
         for f in fills:
-            portfolio.record_fill(f["symbol"], f["side"], f["qty"], f["price"])
-        return {"order_id": order_id, "immediate_fills": len(fills)}
+            if f.get("type") == "CANCEL":
+                portfolio.cancel_order(f["order_id"])
+            else:
+                portfolio.record_fill(f.get("order_id", ""), f["symbol"], f["side"], f["qty"], f["price"])
+                real_fills.append({"symbol": f["symbol"], "side": f["side"], "qty": f["qty"], "price": f["price"]})
+        return {"order_id": order_id, "immediate_fills": len(real_fills)}
 
     @env.tool()
     async def cancel_order(order_id: str, symbol: str, side: str) -> dict:
@@ -61,6 +76,11 @@ def register(env, client, portfolio):
             {"fills": [...], "count": int}
         """
         fills = client.poll_fills()
+        real_fills = []
         for f in fills:
-            portfolio.record_fill(f["symbol"], f["side"], f["qty"], f["price"])
-        return {"fills": fills, "count": len(fills)}
+            if f.get("type") == "CANCEL":
+                portfolio.cancel_order(f["order_id"])
+            else:
+                portfolio.record_fill(f.get("order_id", ""), f["symbol"], f["side"], f["qty"], f["price"])
+                real_fills.append({"symbol": f["symbol"], "side": f["side"], "qty": f["qty"], "price": f["price"]})
+        return {"fills": real_fills, "count": len(real_fills)}

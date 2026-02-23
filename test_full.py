@@ -236,16 +236,16 @@ def test_grader():
     check("zero profit → PnLGrader score 0.0", g.score == 0.0)
 
     # PnLGrader: full profit (AMZ actual prices: buy ~102, sell ~104 → $200 on 100 shares)
-    p.record_fill("AMZ", "BUY",  100, 102.0)   # fill at ask=102
-    p.record_fill("AMZ", "SELL", 100, 104.0)   # sell at 104 → $200 profit
+    p.record_fill("dummy", "AMZ", "BUY",  100, 102.0)   # fill at ask=102
+    p.record_fill("dummy", "AMZ", "SELL", 100, 104.0)   # sell at 104 → $200 profit
     g = PnLGrader.grade(weight=1.0, portfolio=p, initial_cash=15_000, target_profit=200)
     check("profit=200, target=200 → PnLGrader 1.0", abs(g.score - 1.0) < 1e-6)
     print(f"       actual_profit={p.net_profit():.2f}")
 
     # PnLGrader: partial (100 shares, buy 102, sell 103 → $100 = 50% of target 200)
     p2 = Portfolio(initial_cash=15_000)
-    p2.record_fill("AMZ", "BUY",  100, 102.0)
-    p2.record_fill("AMZ", "SELL", 100, 103.0)  # $100 → 0.5 of target 200
+    p2.record_fill("dummy", "AMZ", "BUY",  100, 102.0)
+    p2.record_fill("dummy", "AMZ", "SELL", 100, 103.0)  # $100 → 0.5 of target 200
     g2 = PnLGrader.grade(weight=1.0, portfolio=p2, initial_cash=15_000, target_profit=200)
     check("profit=100, target=200 → PnLGrader 0.5", abs(g2.score - 0.5) < 1e-6)
 

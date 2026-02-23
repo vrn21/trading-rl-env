@@ -39,17 +39,62 @@ class Portfolio:
     def __init__(self, initial_cash: float = 15_000.0):
         self.initial_cash = initial_cash
         self.cash = initial_cash
+        self.locked_cash = 0.0
         self.positions: dict[str, dict] = {}   # {symbol: {qty, avg_price}}
+        self.locked_positions: dict[str, int] = {} # {symbol: qty}
+        self.active_orders: dict[str, dict] = {} # {order_id: {symbol, side, qty, price}}
         self.fills: list[dict] = []
 
     def reset(self, initial_cash: float | None = None) -> None:
         if initial_cash is not None:            # NOTE: "if initial_cash:" fails for 0.0
             self.initial_cash = initial_cash
         self.cash = self.initial_cash
+        self.locked_cash = 0.0
         self.positions = {}
+        self.locked_positions = {}
+        self.active_orders = {}
         self.fills = []
 
-    def record_fill(self, symbol: str, side: str, qty: int, price: float) -> None:
+    def place_order(self, order_id: str, symbol: str, side: str, qty: int, price: float) -> str | None:
+        """Lock funds/positions. Returns error string if invalid, else None."""
+        if side == "BUY":
+            cost = qty * price
+            if self.cash - self.locked_cash < cost:
+                return f"Insufficient available funds: order costs {cost:.2f} but available is {(self.cash - self.locked_cash):.2f}"
+            self.locked_cash += cost
+        else:
+            held = self.positions.get(symbol, {}).get("qty", 0)
+            locked = self.locked_positions.get(symbol, 0)
+            if held - locked < qty:
+                return f"Insufficient available position: trying to sell {qty} {symbol} but only {held - locked} available"
+            self.locked_positions[symbol] = locked + qty
+
+        self.active_orders[order_id] = {"symbol": symbol, "side": side, "qty": qty, "price": price}
+        return None
+
+    def cancel_order(self, order_id: str) -> None:
+        """Unlock remaining funds/positions for an order. Called via ExecutionReport."""
+        order = self.active_orders.pop(order_id, None)
+        if order:
+            if order["side"] == "BUY":
+                self.locked_cash -= order["qty"] * order["price"]
+            else:
+                self.locked_positions[order["symbol"]] -= order["qty"]
+
+    def record_fill(self, order_id: str, symbol: str, side: str, qty: int, price: float) -> None:
+        # 1. Unlock reserving margin matching the fill qty
+        order = self.active_orders.get(order_id)
+        if order:
+            if side == "BUY":
+                self.locked_cash -= qty * order["price"]
+            else:
+                self.locked_positions[symbol] -= qty
+            
+            order["qty"] -= qty
+            if order["qty"] <= 0:
+                self.active_orders.pop(order_id)
+
+        # 2. Apply actual execution to real balances
         self.cash += -(qty * price) if side == "BUY" else (qty * price)
         pos = self.positions.setdefault(symbol, {"qty": 0, "avg_price": 0.0})
         if side == "BUY":
@@ -58,6 +103,7 @@ class Portfolio:
             pos["avg_price"] = total / pos["qty"]
         else:
             pos["qty"] = max(0, pos["qty"] - qty)
+            
         self.fills.append({"symbol": symbol, "side": side, "qty": qty, "price": price})
 
     def last_price(self, symbol: str) -> float | None:
@@ -79,10 +125,12 @@ class Portfolio:
 
     def to_dict(self) -> dict:
         return {
-            "cash":         round(self.cash, 2),
-            "net_profit":   round(self.net_profit(), 2),
-            "positions":    {s: p for s, p in self.positions.items() if p["qty"] > 0},
-            "total_fills":  len(self.fills),
+            "cash":           round(self.cash, 2),
+            "available_cash": round(self.cash - self.locked_cash, 2),
+            "net_profit":     round(self.net_profit(), 2),
+            "positions":      {s: p for s, p in self.positions.items() if p["qty"] > 0},
+            "open_orders":    len(self.active_orders),
+            "total_fills":    len(self.fills),
         }
 
 
@@ -159,9 +207,9 @@ class QuantReplayClient:
             self._sock.close()
             self._sock = None
 
-    def place_order(self, symbol: str, side: str, qty: int, price: float) -> str:
+    def place_order(self, symbol: str, side: str, qty: int, price: float, order_id: str | None = None) -> str:
         """Send NewOrderSingle (35=D). Returns ClOrdID for tracking."""
-        oid = uuid.uuid4().hex[:8]
+        oid = order_id or uuid.uuid4().hex[:8]
         msg = self._build("D")
         msg.append_pair(11, oid)                 # ClOrdID
         msg.append_pair(21, "1")                 # HandlInst = AutoExec
@@ -190,10 +238,10 @@ class QuantReplayClient:
         self._send(msg)
 
     def poll_fills(self) -> list[dict]:
-        """Read pending ExecutionReports. Returns fills (ExecType=F = Trade).
+        """Read pending ExecutionReports. Returns fills and cancellations.
 
         ExecType values per FIX spec:
-          0 = New, 4 = Canceled, 5 = Replaced, 8 = Rejected, F = Trade
+          0 = New, 4 = Canceled, 5 = Replaced, 8 = Rejected, C = Expired, F = Trade
         """
         fills: list[dict] = []
         if not self._sock:
@@ -207,13 +255,23 @@ class QuantReplayClient:
                         break
                     self._parser.append_buffer(data)
                     while msg := self._parser.get_message():
-                        if msg.get(35) == b"8" and msg.get(150) == b"F":  # ExecType = Trade
-                            fills.append({
-                                "symbol": (msg.get(55) or b"").decode(),
-                                "side":   "BUY" if msg.get(54) == b"1" else "SELL",
-                                "qty":    int((msg.get(32) or b"0").decode()),
-                                "price":  float((msg.get(31) or b"0").decode()),
-                            })
+                        if msg.get(35) == b"8":
+                            exec_type = msg.get(150)
+                            order_id = (msg.get(41) or msg.get(11) or b"").decode() # Use OrigClOrdID if cancel
+
+                            if exec_type == b"F":  # Trade
+                                fills.append({
+                                    "order_id": order_id,
+                                    "symbol": (msg.get(55) or b"").decode(),
+                                    "side":   "BUY" if msg.get(54) == b"1" else "SELL",
+                                    "qty":    int((msg.get(32) or b"0").decode()),
+                                    "price":  float((msg.get(31) or b"0").decode()),
+                                })
+                            elif exec_type in (b"4", b"8", b"C"):  # Canceled, Rejected, Expired
+                                fills.append({
+                                    "order_id": order_id,
+                                    "type": "CANCEL"
+                                })
                 except BlockingIOError:
                     break
         except OSError:
