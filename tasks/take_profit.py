@@ -36,6 +36,7 @@ def register(env, client, portfolio):
 
         AMZ trades near 100 EUR with a bid/ask spread of ~98/102.
         Random orders fire at 3/sec providing ample liquidity.
+        You will only be given very limited amount of turns to complete the task [under 30 turns] So make sure that you actually get profit as fast as possible
         """
 
         # ── Setup ─────────────────────────────────────────────────────────
