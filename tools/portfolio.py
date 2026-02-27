@@ -12,9 +12,6 @@ def register(env, client, portfolio):
     async def get_portfolio() -> dict:
         """Get your current cash balance, open positions, and net profit.
 
-        Net profit is calculated using the last fill price for each open
-        position (there is no live market data feed — price comes from fills).
-
         Returns:
             {
               "cash": float,
