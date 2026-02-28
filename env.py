@@ -17,7 +17,7 @@ from hud import Environment
 
 from backend import QuantReplayClient, Portfolio
 from tools import market, orders, portfolio
-from tasks import quant_tasks
+from tasks import basic_tasks, quant_tasks
 
 logging.basicConfig(
     stream=sys.stderr,
@@ -56,6 +56,7 @@ portfolio.register(env, _client, _portfolio)
 
 # ── Register scenarios ────────────────────────────────────────────────────────
 
+basic_tasks.register(env, _client, _portfolio)
 quant_tasks.register(env, _client, _portfolio)
 
 
